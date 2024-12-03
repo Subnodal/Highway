@@ -5,44 +5,21 @@ var args = parseArgs(Deno.args, {
     default: {port: "8000"}
 });
 
-async function serve(connection) {
-    var buffer = new Uint8Array(0);
+async function serialiseRequest(request) {
+    var requestLine = `${request.method} ${new URL(request.url).pathname} HTTP/1.1`;
+    var headers = [...request.headers.entries()].map((part) => `${part[0]}: ${part[1]}`).join("\r\n");
+    var headerData = new TextEncoder().encode(`${requestLine}\r\n${headers}\r\n\r\n`);
+    var body = request.body ? new Uint8Array(await request.arrayBuffer()) : new Uint8Array();
+    var data = new Uint8Array(headerData.length + body.length);
 
-    function appendData(data) {
-        var oldBuffer = buffer;
+    data.set(headerData, 0);
+    data.set(body, headerData.length);
 
-        buffer = new Uint8Array(buffer.length + data.length);
-
-        buffer.set(oldBuffer, 0);
-        buffer.set(data, oldBuffer.length);
-    }
-
-    while (true) {
-        var readBuffer = new Uint8Array(1024);
-        var bytesRead = await connection.read(readBuffer);
-
-        if (bytesRead == null) {
-            break;
-        }
-
-        appendData(readBuffer.slice(0, bytesRead));
-
-        if (bytesRead < 1024) {
-            break;
-        }
-    }
-
-    console.log(new TextDecoder().decode(buffer));
-
-    await Deno.write(connection.rid, new TextEncoder().encode([
-        "HTTP/1.1 200 OK",
-        "Content-Length: 13",
-        "Content-Type: text/plain",
-        "",
-        "Hello, world!"
-    ].join("\r\n")));
+    return data;
 }
 
-for await (var connection of Deno.listen({port: Number(args.port)})) {
-    serve(connection);
-}
+Deno.serve({port: Number(args.port)}, async function(request) {
+    console.log(new TextDecoder().decode(await serialiseRequest(request)));
+
+    return new Response("OK");
+});
